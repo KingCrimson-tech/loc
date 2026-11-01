@@ -1,0 +1,77 @@
+
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DIR="${1:-.}"
+
+if [[ ! -d "$DIR" ]]; then
+    echo "Error: '$DIR' is not a directory."
+    exit 1
+fi
+
+find "$DIR" \
+    \( -name .git -o \
+       -name node_modules -o \
+       -name .venv -o \
+       -name venv -o \
+       -name __pycache__ -o \
+       -name dist -o \
+       -name build \) -prune -o \
+    -type f -print0 |
+while IFS= read -r -d '' file; do
+    if file "$file" | grep -qE 'text|empty'; then
+        awk '
+        BEGIN { block = 0 }
+
+        {
+            line = $0
+
+            # Remove C-style block comments
+            while (1) {
+                if (block) {
+                    if (match(line, /\*\//)) {
+                        line = substr(line, RSTART + RLENGTH)
+                        block = 0
+                    } else {
+                        line = ""
+                        break
+                    }
+                } else if (match(line, /\/\*/)) {
+                    before = substr(line, 1, RSTART - 1)
+                    after = substr(line, RSTART + RLENGTH)
+
+                    if (match(after, /\*\//)) {
+                        line = before substr(after, RSTART + RLENGTH)
+                    } else {
+                        line = before
+                        block = 1
+                    }
+                } else {
+                    break
+                }
+            }
+
+            # Skip blank lines and common comment-only lines
+            if (line ~ /^[[:space:]]*$/) next
+            if (line ~ /^[[:space:]]*#/ ) next
+            if (line ~ /^[[:space:]]*\/\//) next
+            if (line ~ /^[[:space:]]*--/) next
+            if (line ~ /^[[:space:]]*\*/) next
+            if (line ~ /^[[:space:]]*<!--/) next
+
+            count++
+        }
+
+        END { print count + 0 }
+        ' "$file"
+    fi
+done | awk '
+    { total += $1; files++ }
+    END {
+        printf "\nFiles scanned : %d\n", files
+        printf "Code lines    : %d\n\n", total
+    }
+'
+
+
